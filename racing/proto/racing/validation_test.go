@@ -76,6 +76,51 @@ func TestListRacesRequestFilter_Validate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "valid sort field - ADVERTISED_START_TIME",
+			filter: &ListRacesRequestFilter{
+				SortField: sortFieldPtr(SortField_ADVERTISED_START_TIME),
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid sort field - NAME",
+			filter: &ListRacesRequestFilter{
+				SortField: sortFieldPtr(SortField_NAME),
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid sort field - NUMBER",
+			filter: &ListRacesRequestFilter{
+				SortField: sortFieldPtr(SortField_NUMBER),
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid sort direction - ASC",
+			filter: &ListRacesRequestFilter{
+				SortDirection: sortDirectionPtr(SortDirection_ASC),
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid sort direction - DESC",
+			filter: &ListRacesRequestFilter{
+				SortDirection: sortDirectionPtr(SortDirection_DESC),
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid complete filter with sorting",
+			filter: &ListRacesRequestFilter{
+				MeetingIds:    []int64{1, 2, 3},
+				VisibleOnly:   boolPtr(true),
+				SortField:     sortFieldPtr(SortField_NAME),
+				SortDirection: sortDirectionPtr(SortDirection_DESC),
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -104,4 +149,14 @@ func TestListRacesRequestFilter_Validate(t *testing.T) {
 
 func boolPtr(b bool) *bool {
 	return &b
+}
+
+// sortFieldPtr returns a pointer to the given SortField value
+func sortFieldPtr(sf SortField) *SortField {
+	return &sf
+}
+
+// sortDirectionPtr returns a pointer to the given SortDirection value
+func sortDirectionPtr(sd SortDirection) *SortDirection {
+	return &sd
 }

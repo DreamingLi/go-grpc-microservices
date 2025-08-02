@@ -56,15 +56,6 @@ func newTestRepo(races []*racing.Race, err error) db.RacesRepo {
 	}
 }
 
-// Helper function to create test repository with delay
-func newTestRepoWithDelay(races []*racing.Race, err error, delay time.Duration) db.RacesRepo {
-	return &testRacesRepo{
-		races: races,
-		err:   err,
-		delay: delay,
-	}
-}
-
 func TestNewRacingService(t *testing.T) {
 	tests := []struct {
 		name   string

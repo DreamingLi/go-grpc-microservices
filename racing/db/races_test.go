@@ -62,6 +62,16 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
+// sortFieldPtr returns a pointer to the given SortField value
+func sortFieldPtr(sf racing.SortField) *racing.SortField {
+	return &sf
+}
+
+// sortDirectionPtr returns a pointer to the given SortDirection value
+func sortDirectionPtr(sd racing.SortDirection) *racing.SortDirection {
+	return &sd
+}
+
 func TestApplyFilter(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -357,5 +367,194 @@ func TestNewRacesRepo(t *testing.T) {
 	repo := NewRacesRepo(db)
 	if repo == nil {
 		t.Error("NewRacesRepo() returned nil, want non-nil repo")
+	}
+}
+
+func TestApplySorting(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    *racing.ListRacesRequestFilter
+		baseQuery string
+		want      string
+	}{
+		{
+			name:      "nil filter uses default sorting",
+			filter:    nil,
+			baseQuery: "SELECT * FROM races",
+			want:      "SELECT * FROM races ORDER BY advertised_start_time ASC",
+		},
+		{
+			name:      "empty filter uses default sorting",
+			filter:    &racing.ListRacesRequestFilter{},
+			baseQuery: "SELECT * FROM races",
+			want:      "SELECT * FROM races ORDER BY advertised_start_time ASC",
+		},
+		{
+			name: "sort by name ascending",
+			filter: &racing.ListRacesRequestFilter{
+				SortField:     sortFieldPtr(racing.SortField_NAME),
+				SortDirection: sortDirectionPtr(racing.SortDirection_ASC),
+			},
+			baseQuery: "SELECT * FROM races",
+			want:      "SELECT * FROM races ORDER BY name ASC",
+		},
+		{
+			name: "sort by name descending",
+			filter: &racing.ListRacesRequestFilter{
+				SortField:     sortFieldPtr(racing.SortField_NAME),
+				SortDirection: sortDirectionPtr(racing.SortDirection_DESC),
+			},
+			baseQuery: "SELECT * FROM races",
+			want:      "SELECT * FROM races ORDER BY name DESC",
+		},
+		{
+			name: "sort by number ascending",
+			filter: &racing.ListRacesRequestFilter{
+				SortField:     sortFieldPtr(racing.SortField_NUMBER),
+				SortDirection: sortDirectionPtr(racing.SortDirection_ASC),
+			},
+			baseQuery: "SELECT * FROM races",
+			want:      "SELECT * FROM races ORDER BY number ASC",
+		},
+		{
+			name: "sort by advertised start time descending",
+			filter: &racing.ListRacesRequestFilter{
+				SortField:     sortFieldPtr(racing.SortField_ADVERTISED_START_TIME),
+				SortDirection: sortDirectionPtr(racing.SortDirection_DESC),
+			},
+			baseQuery: "SELECT * FROM races",
+			want:      "SELECT * FROM races ORDER BY advertised_start_time DESC",
+		},
+		{
+			name: "only sort field specified defaults to ASC",
+			filter: &racing.ListRacesRequestFilter{
+				SortField: sortFieldPtr(racing.SortField_NUMBER),
+			},
+			baseQuery: "SELECT * FROM races",
+			want:      "SELECT * FROM races ORDER BY number ASC",
+		},
+		{
+			name: "only sort direction specified uses default field",
+			filter: &racing.ListRacesRequestFilter{
+				SortDirection: sortDirectionPtr(racing.SortDirection_DESC),
+			},
+			baseQuery: "SELECT * FROM races",
+			want:      "SELECT * FROM races ORDER BY advertised_start_time DESC",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &racesRepo{}
+			got := repo.applySorting(tt.baseQuery, tt.filter)
+
+			if got != tt.want {
+				t.Errorf("applySorting() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRacesRepo_List_Sorting(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Failed to close database: %v", err)
+		}
+	}()
+
+	repo := NewRacesRepo(db)
+
+	// Setup test data with different start times for sorting
+	now := time.Now()
+	testRaces := []struct {
+		id        int
+		meetingID int
+		name      string
+		number    int
+		visible   bool
+		startTime time.Time
+	}{
+		{1, 1, "Charlie Race", 3, true, now.Add(3 * time.Hour)}, // Latest time
+		{2, 1, "Alpha Race", 1, true, now.Add(1 * time.Hour)},   // Earliest time
+		{3, 1, "Bravo Race", 2, true, now.Add(2 * time.Hour)},   // Middle time
+	}
+
+	for _, race := range testRaces {
+		insertTestRace(t, db, race.id, race.meetingID, race.number, race.name, race.visible, race.startTime)
+	}
+
+	tests := []struct {
+		name       string
+		filter     *racing.ListRacesRequestFilter
+		wantOrder  []int64 // Expected race IDs in order
+	}{
+		{
+			name:      "default sorting by advertised_start_time ASC",
+			filter:    &racing.ListRacesRequestFilter{},
+			wantOrder: []int64{2, 3, 1}, // Earliest to latest
+		},
+		{
+			name: "sort by advertised_start_time DESC",
+			filter: &racing.ListRacesRequestFilter{
+				SortField:     sortFieldPtr(racing.SortField_ADVERTISED_START_TIME),
+				SortDirection: sortDirectionPtr(racing.SortDirection_DESC),
+			},
+			wantOrder: []int64{1, 3, 2}, // Latest to earliest
+		},
+		{
+			name: "sort by name ASC",
+			filter: &racing.ListRacesRequestFilter{
+				SortField:     sortFieldPtr(racing.SortField_NAME),
+				SortDirection: sortDirectionPtr(racing.SortDirection_ASC),
+			},
+			wantOrder: []int64{2, 3, 1}, // Alpha, Bravo, Charlie
+		},
+		{
+			name: "sort by name DESC",
+			filter: &racing.ListRacesRequestFilter{
+				SortField:     sortFieldPtr(racing.SortField_NAME),
+				SortDirection: sortDirectionPtr(racing.SortDirection_DESC),
+			},
+			wantOrder: []int64{1, 3, 2}, // Charlie, Bravo, Alpha
+		},
+		{
+			name: "sort by number ASC",
+			filter: &racing.ListRacesRequestFilter{
+				SortField:     sortFieldPtr(racing.SortField_NUMBER),
+				SortDirection: sortDirectionPtr(racing.SortDirection_ASC),
+			},
+			wantOrder: []int64{2, 3, 1}, // Numbers 1, 2, 3
+		},
+		{
+			name: "sort by number DESC",
+			filter: &racing.ListRacesRequestFilter{
+				SortField:     sortFieldPtr(racing.SortField_NUMBER),
+				SortDirection: sortDirectionPtr(racing.SortDirection_DESC),
+			},
+			wantOrder: []int64{1, 3, 2}, // Numbers 3, 2, 1
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotRaces, err := repo.List(tt.filter)
+			if err != nil {
+				t.Fatalf("List(%+v) failed: %v", tt.filter, err)
+			}
+
+			if len(gotRaces) != len(tt.wantOrder) {
+				t.Fatalf("List(%+v) returned %d races, want %d", tt.filter, len(gotRaces), len(tt.wantOrder))
+			}
+
+			var gotOrder []int64
+			for _, race := range gotRaces {
+				gotOrder = append(gotOrder, race.Id)
+			}
+
+			if diff := cmp.Diff(tt.wantOrder, gotOrder); diff != "" {
+				t.Errorf("List(%+v) race order mismatch (-want +got):\n%s", tt.filter, diff)
+			}
+		})
 	}
 }
