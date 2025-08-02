@@ -1,0 +1,361 @@
+package db
+
+import (
+	"database/sql"
+	"testing"
+	"time"
+
+	"git.neds.sh/matty/entain/racing/proto/racing"
+	"github.com/golang/protobuf/ptypes"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	_ "github.com/mattn/go-sqlite3"
+)
+
+// setupTestDB creates an in-memory SQLite database for testing
+func setupTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("setupTestDB() failed to open database: %v", err)
+	}
+
+	query := `
+		CREATE TABLE races (
+			id INTEGER PRIMARY KEY,
+			meeting_id INTEGER,
+			name TEXT,
+			number INTEGER,
+			visible INTEGER,
+			advertised_start_time DATETIME
+		)
+	`
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("setupTestDB() failed to create table: %v", err)
+	}
+
+	return db
+}
+
+// insertTestRace inserts a test race into the database
+func insertTestRace(t *testing.T, db *sql.DB, id, meetingID, number int, name string, visible bool, startTime time.Time) {
+	t.Helper()
+
+	visibleInt := 0
+	if visible {
+		visibleInt = 1
+	}
+
+	query := `
+		INSERT INTO races (id, meeting_id, name, number, visible, advertised_start_time)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`
+	_, err := db.Exec(query, id, meetingID, name, number, visibleInt, startTime.Format(time.RFC3339))
+	if err != nil {
+		t.Fatalf("insertTestRace(id=%d) failed: %v", id, err)
+	}
+}
+
+// boolPtr returns a pointer to the given bool value
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func TestApplyFilter(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    *racing.ListRacesRequestFilter
+		wantQuery string
+		wantArgs  []interface{}
+	}{
+		{
+			name:      "nil filter returns original query",
+			filter:    nil,
+			wantQuery: "SELECT * FROM races",
+			wantArgs:  nil,
+		},
+		{
+			name:      "empty filter returns original query",
+			filter:    &racing.ListRacesRequestFilter{},
+			wantQuery: "SELECT * FROM races",
+			wantArgs:  nil,
+		},
+		{
+			name: "visible only true adds visible clause",
+			filter: &racing.ListRacesRequestFilter{
+				VisibleOnly: boolPtr(true),
+			},
+			wantQuery: "SELECT * FROM races WHERE visible = 1",
+			wantArgs:  nil,
+		},
+		{
+			name: "visible only false does not add visible clause",
+			filter: &racing.ListRacesRequestFilter{
+				VisibleOnly: boolPtr(false),
+			},
+			wantQuery: "SELECT * FROM races",
+			wantArgs:  nil,
+		},
+		{
+			name: "meeting ids filter creates IN clause",
+			filter: &racing.ListRacesRequestFilter{
+				MeetingIds: []int64{1, 2, 3},
+			},
+			wantQuery: "SELECT * FROM races WHERE meeting_id IN (?,?,?)",
+			wantArgs:  []interface{}{int64(1), int64(2), int64(3)},
+		},
+		{
+			name: "combined filters work together",
+			filter: &racing.ListRacesRequestFilter{
+				MeetingIds:  []int64{1, 2},
+				VisibleOnly: boolPtr(true),
+			},
+			wantQuery: "SELECT * FROM races WHERE meeting_id IN (?,?) AND visible = 1",
+			wantArgs:  []interface{}{int64(1), int64(2)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &racesRepo{}
+			baseQuery := "SELECT * FROM races"
+
+			gotQuery, gotArgs := repo.applyFilter(baseQuery, tt.filter)
+
+			if gotQuery != tt.wantQuery {
+				t.Errorf("applyFilter() query = %q, want %q", gotQuery, tt.wantQuery)
+			}
+
+			// Use lenient comparison that allows nil and empty slice equivalence
+			argsEqual := (tt.wantArgs == nil && gotArgs == nil) ||
+				(tt.wantArgs == nil && len(gotArgs) == 0) ||
+				(len(tt.wantArgs) == 0 && gotArgs == nil) ||
+				cmp.Equal(tt.wantArgs, gotArgs)
+
+			if !argsEqual {
+				t.Errorf("applyFilter() args = %v, want %v", gotArgs, tt.wantArgs)
+			}
+		})
+	}
+}
+
+func TestRacesRepo_List(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Failed to close database: %v", err)
+		}
+	}()
+
+	repo := NewRacesRepo(db)
+
+	// Setup test data
+	now := time.Now()
+	testRaces := []struct {
+		id        int
+		meetingID int
+		name      string
+		number    int
+		visible   bool
+		startTime time.Time
+	}{
+		{1, 1, "Visible Race 1", 1, true, now.Add(time.Hour)},
+		{2, 1, "Hidden Race 1", 2, false, now.Add(2 * time.Hour)},
+		{3, 2, "Visible Race 2", 1, true, now.Add(3 * time.Hour)},
+		{4, 2, "Hidden Race 2", 2, false, now.Add(4 * time.Hour)},
+	}
+
+	for _, race := range testRaces {
+		insertTestRace(t, db, race.id, race.meetingID, race.number, race.name, race.visible, race.startTime)
+	}
+
+	tests := []struct {
+		name    string
+		filter  *racing.ListRacesRequestFilter
+		wantIDs []int64
+	}{
+		{
+			name:    "no filter returns all races",
+			filter:  &racing.ListRacesRequestFilter{},
+			wantIDs: []int64{1, 2, 3, 4},
+		},
+		{
+			name: "visible only true returns only visible races",
+			filter: &racing.ListRacesRequestFilter{
+				VisibleOnly: boolPtr(true),
+			},
+			wantIDs: []int64{1, 3},
+		},
+		{
+			name: "visible only false returns all races",
+			filter: &racing.ListRacesRequestFilter{
+				VisibleOnly: boolPtr(false),
+			},
+			wantIDs: []int64{1, 2, 3, 4},
+		},
+		{
+			name: "meeting ids filter works correctly",
+			filter: &racing.ListRacesRequestFilter{
+				MeetingIds: []int64{1},
+			},
+			wantIDs: []int64{1, 2},
+		},
+		{
+			name: "combined meeting ids and visible only filters",
+			filter: &racing.ListRacesRequestFilter{
+				MeetingIds:  []int64{1},
+				VisibleOnly: boolPtr(true),
+			},
+			wantIDs: []int64{1},
+		},
+		{
+			name: "non existent meeting id returns empty results",
+			filter: &racing.ListRacesRequestFilter{
+				MeetingIds: []int64{999},
+			},
+			wantIDs: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotRaces, err := repo.List(tt.filter)
+			if err != nil {
+				t.Fatalf("List(%+v) failed: %v", tt.filter, err)
+			}
+
+			var gotIDs []int64
+			for _, race := range gotRaces {
+				gotIDs = append(gotIDs, race.Id)
+			}
+
+			if tt.wantIDs == nil && len(gotIDs) == 0 {
+				// Test passes: expected nil, got empty slice, they are equivalent
+				return
+			}
+
+			sortOpt := cmpopts.SortSlices(func(a, b int64) bool { return a < b })
+			if diff := cmp.Diff(tt.wantIDs, gotIDs, sortOpt); diff != "" {
+				t.Errorf("List(%+v) race IDs mismatch (-want +got):\n%s", tt.filter, diff)
+			}
+
+			// Additional validations for each race
+			for _, race := range gotRaces {
+				// Validate required fields are not zero values
+				if race.Id <= 0 {
+					t.Errorf("List(%+v): race.Id = %d, want > 0", tt.filter, race.Id)
+				}
+				if race.MeetingId <= 0 {
+					t.Errorf("List(%+v): race.MeetingId = %d, want > 0", tt.filter, race.MeetingId)
+				}
+				if race.Name == "" {
+					t.Errorf("List(%+v): race.Name is empty for race ID %d", tt.filter, race.Id)
+				}
+				if race.Number <= 0 {
+					t.Errorf("List(%+v): race.Number = %d, want > 0 for race ID %d", tt.filter, race.Number, race.Id)
+				}
+				if race.AdvertisedStartTime == nil {
+					t.Errorf("List(%+v): race.AdvertisedStartTime is nil for race ID %d", tt.filter, race.Id)
+				}
+
+				if tt.filter != nil && tt.filter.VisibleOnly != nil && *tt.filter.VisibleOnly {
+					if !race.Visible {
+						t.Errorf("List(%+v): expected only visible races, but race ID %d has visible = %t",
+							tt.filter, race.Id, race.Visible)
+					}
+				}
+
+				if tt.filter != nil && len(tt.filter.MeetingIds) > 0 {
+					found := false
+					for _, meetingID := range tt.filter.MeetingIds {
+						if race.MeetingId == meetingID {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("List(%+v): race ID %d has meeting_id %d, which is not in filter",
+							tt.filter, race.Id, race.MeetingId)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRacesRepo_List_DataIntegrity(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repo := NewRacesRepo(db)
+
+	// Insert test race with specific known values
+	testTime := time.Date(2024, 1, 15, 14, 30, 0, 0, time.UTC)
+	insertTestRace(t, db, 1, 123, 5, "Test Race", true, testTime)
+
+	gotRaces, err := repo.List(&racing.ListRacesRequestFilter{
+		VisibleOnly: boolPtr(true),
+	})
+	if err != nil {
+		t.Fatalf("List() failed: %v", err)
+	}
+
+	if len(gotRaces) != 1 {
+		t.Fatalf("List() returned %d races, want 1", len(gotRaces))
+	}
+
+	race := gotRaces[0]
+
+	// Test each field individually for better error messages
+	if race.Id != 1 {
+		t.Errorf("List() race.Id = %d, want 1", race.Id)
+	}
+	if race.MeetingId != 123 {
+		t.Errorf("List() race.MeetingId = %d, want 123", race.MeetingId)
+	}
+	if race.Name != "Test Race" {
+		t.Errorf("List() race.Name = %q, want %q", race.Name, "Test Race")
+	}
+	if race.Number != 5 {
+		t.Errorf("List() race.Number = %d, want 5", race.Number)
+	}
+	if !race.Visible {
+		t.Errorf("List() race.Visible = %t, want true", race.Visible)
+	}
+
+	// Check timestamp conversion
+	if race.AdvertisedStartTime == nil {
+		t.Errorf("List() race.AdvertisedStartTime is nil")
+	} else {
+		gotTime, err := ptypes.Timestamp(race.AdvertisedStartTime)
+		if err != nil {
+			t.Errorf("List() failed to convert timestamp: %v", err)
+		} else if !testTime.Equal(gotTime) {
+			t.Errorf("List() race.AdvertisedStartTime = %v, want %v", gotTime, testTime)
+		}
+	}
+}
+
+func TestRacesRepo_List_DatabaseErrors(t *testing.T) {
+	// Test with closed database to simulate database errors
+	db := setupTestDB(t)
+	db.Close() // Close immediately to cause errors
+
+	repo := NewRacesRepo(db)
+
+	_, err := repo.List(&racing.ListRacesRequestFilter{})
+	if err == nil {
+		t.Error("List() with closed database returned no error, want error")
+	}
+}
+
+func TestNewRacesRepo(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	repo := NewRacesRepo(db)
+	if repo == nil {
+		t.Error("NewRacesRepo() returned nil, want non-nil repo")
+	}
+}

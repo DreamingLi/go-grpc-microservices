@@ -43,6 +43,9 @@ func (r *racesRepo) Init() error {
 	return err
 }
 
+// List retrieves races from the database based on the provided filter.
+// It supports filtering by meeting IDs and visibility status.
+// The method returns races in the order they appear in the database.
 func (r *racesRepo) List(filter *racing.ListRacesRequestFilter) ([]*racing.Race, error) {
 	var (
 		err   error
@@ -62,6 +65,8 @@ func (r *racesRepo) List(filter *racing.ListRacesRequestFilter) ([]*racing.Race,
 	return r.scanRaces(rows)
 }
 
+// applyFilter modifies the base query to include WHERE clauses based on the filter.
+// It returns the modified query string and the corresponding arguments for parameterized queries.
 func (r *racesRepo) applyFilter(query string, filter *racing.ListRacesRequestFilter) (string, []interface{}) {
 	var (
 		clauses []string
@@ -73,14 +78,19 @@ func (r *racesRepo) applyFilter(query string, filter *racing.ListRacesRequestFil
 	}
 
 	if len(filter.MeetingIds) > 0 {
-		clauses = append(clauses, "meeting_id IN ("+strings.Repeat("?,", len(filter.MeetingIds)-1)+"?)")
+		placeholders := strings.Repeat("?,", len(filter.MeetingIds)-1) + "?"
+		clauses = append(clauses, "meeting_id IN ("+placeholders+")")
 
 		for _, meetingID := range filter.MeetingIds {
 			args = append(args, meetingID)
 		}
 	}
 
-	if len(clauses) != 0 {
+	if filter.VisibleOnly != nil && *filter.VisibleOnly {
+		clauses = append(clauses, "visible = 1")
+	}
+
+	if len(clauses) > 0 {
 		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
 
