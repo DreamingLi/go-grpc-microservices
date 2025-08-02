@@ -29,6 +29,10 @@ func (f *ListRacesRequestFilter) Validate() error {
 		return fmt.Errorf("visible_only validation failed: %w", err)
 	}
 
+	if err := f.validateSorting(); err != nil {
+		return fmt.Errorf("sorting validation failed: %w", err)
+	}
+
 	return nil
 }
 
@@ -61,5 +65,30 @@ func (f *ListRacesRequestFilter) validateMeetingIds() error {
 
 // validateVisibleOnly validates visible_only field (future extensibility)
 func (f *ListRacesRequestFilter) validateVisibleOnly() error {
+	return nil
+}
+
+// validateSorting validates sorting parameters
+func (f *ListRacesRequestFilter) validateSorting() error {
+	// Validate sort field
+	if f.SortField != nil {
+		switch *f.SortField {
+		case SortField_ADVERTISED_START_TIME, SortField_NAME, SortField_NUMBER:
+			// Valid sort fields
+		default:
+			return fmt.Errorf("invalid sort field: %v", *f.SortField)
+		}
+	}
+
+	// Validate sort direction
+	if f.SortDirection != nil {
+		switch *f.SortDirection {
+		case SortDirection_ASC, SortDirection_DESC:
+			// Valid sort directions
+		default:
+			return fmt.Errorf("invalid sort direction: %v", *f.SortDirection)
+		}
+	}
+
 	return nil
 }

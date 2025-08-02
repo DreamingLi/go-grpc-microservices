@@ -45,7 +45,7 @@ func (r *racesRepo) Init() error {
 
 // List retrieves races from the database based on the provided filter.
 // It supports filtering by meeting IDs and visibility status.
-// The method returns races in the order they appear in the database.
+// Results are ordered by advertised_start_time ASC by default, or by the specified sort field and direction.
 func (r *racesRepo) List(filter *racing.ListRacesRequestFilter) ([]*racing.Race, error) {
 	var (
 		err   error
@@ -56,6 +56,7 @@ func (r *racesRepo) List(filter *racing.ListRacesRequestFilter) ([]*racing.Race,
 	query = getRaceQueries()[racesList]
 
 	query, args = r.applyFilter(query, filter)
+	query = r.applySorting(query, filter)
 
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
@@ -95,6 +96,38 @@ func (r *racesRepo) applyFilter(query string, filter *racing.ListRacesRequestFil
 	}
 
 	return query, args
+}
+
+// applySorting adds ORDER BY clause to the query based on the filter's sort preferences.
+// Defaults to ORDER BY advertised_start_time ASC if no sort field is specified.
+func (r *racesRepo) applySorting(query string, filter *racing.ListRacesRequestFilter) string {
+	var sortField string
+	var sortDirection string
+
+	// Determine sort field (default to advertised_start_time)
+	if filter != nil && filter.SortField != nil {
+		switch *filter.SortField {
+		case racing.SortField_NAME:
+			sortField = "name"
+		case racing.SortField_NUMBER:
+			sortField = "number"
+		case racing.SortField_ADVERTISED_START_TIME:
+			sortField = "advertised_start_time"
+		default:
+			sortField = "advertised_start_time"
+		}
+	} else {
+		sortField = "advertised_start_time"
+	}
+
+	// Determine sort direction (default to ASC)
+	if filter != nil && filter.SortDirection != nil && *filter.SortDirection == racing.SortDirection_DESC {
+		sortDirection = "DESC"
+	} else {
+		sortDirection = "ASC"
+	}
+
+	return query + " ORDER BY " + sortField + " " + sortDirection
 }
 
 func (m *racesRepo) scanRaces(

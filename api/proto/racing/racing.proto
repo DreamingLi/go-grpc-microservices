@@ -29,6 +29,22 @@ message ListRacesResponse {
 message ListRacesRequestFilter {
   repeated int64 meeting_ids = 1;
   optional bool visible_only = 2;
+  optional SortField sort_field = 3; // Defaults to ADVERTISED_START_TIME if not specified.
+  optional SortDirection sort_direction = 4; // Defaults to ASC if not specified.
+}
+
+
+// Available fields for sorting races.
+enum SortField {
+  ADVERTISED_START_TIME = 0;
+  NAME = 1;
+  NUMBER = 2;
+}
+
+// Sort direction options.
+enum SortDirection {
+  ASC = 0; // Ascending order (default).
+  DESC = 1;  // Descending order.
 }
 
 /* Resources */
