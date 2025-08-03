@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,9 @@ type RacesRepo interface {
 
 	// List will return a list of races.
 	List(filter *racing.ListRacesRequestFilter) ([]*racing.Race, error)
+
+	// GetByID will return a single race by its ID.
+	GetByID(id int64) (*racing.Race, error)
 }
 
 type racesRepo struct {
@@ -64,6 +68,37 @@ func (r *racesRepo) List(filter *racing.ListRacesRequestFilter) ([]*racing.Race,
 	}
 
 	return r.scanRaces(rows)
+}
+
+// GetByID retrieves a single race from the database by its ID.
+// Returns the race if found, or an error if not found or database error occurs.
+func (r *racesRepo) GetByID(id int64) (*racing.Race, error) {
+	query := getRaceQueries()[racesGetByID]
+	
+	row := r.db.QueryRow(query, id)
+	
+	var race racing.Race
+	var advertisedStart time.Time
+	
+	err := row.Scan(&race.Id, &race.MeetingId, &race.Name, &race.Number, &race.Visible, &advertisedStart)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("race with ID %d not found", id)
+		}
+		return nil, err
+	}
+	
+	ts, err := ptypes.TimestampProto(advertisedStart)
+	if err != nil {
+		return nil, err
+	}
+	
+	race.AdvertisedStartTime = ts
+	
+	// Set race status based on advertised start time
+	setRaceStatus(&race, advertisedStart)
+	
+	return &race, nil
 }
 
 // applyFilter modifies the base query to include WHERE clauses based on the filter.
@@ -154,14 +189,20 @@ func (r *racesRepo) scanRaces(
 
 		race.AdvertisedStartTime = ts
 
-		// Derive status based on advertised_start_time
-		race.Status = racing.RaceStatus_OPEN
-		if advertisedStart.Before(time.Now()) {
-			race.Status = racing.RaceStatus_CLOSED
-		}
+		// Set race status based on advertised start time
+		setRaceStatus(&race, advertisedStart)
 
 		races = append(races, &race)
 	}
 
 	return races, nil
+}
+
+// setRaceStatus sets the race status based on the advertised start time.
+// Races with advertised start time in the past are marked as CLOSED, others as OPEN.
+func setRaceStatus(race *racing.Race, advertisedStart time.Time) {
+	race.Status = racing.RaceStatus_OPEN
+	if advertisedStart.Before(time.Now()) {
+		race.Status = racing.RaceStatus_CLOSED
+	}
 }

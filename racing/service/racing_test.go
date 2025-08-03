@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"git.neds.sh/matty/entain/racing/db"
 	"git.neds.sh/matty/entain/racing/proto/racing"
@@ -21,26 +20,30 @@ type testRacesRepo struct {
 	err        error
 	lastFilter *racing.ListRacesRequestFilter
 	initCalled bool
-	delay      time.Duration // Add delay for testing slow queries
+}
+
+// GetByID implements the db.RacesRepo interface for testing.
+func (t *testRacesRepo) GetByID(id int64) (*racing.Race, error) {
+	for _, race := range t.races {
+		if race.Id == id {
+			return race, nil
+		}
+	}
+	return nil, errors.New("race not found")
+}
+
+// List implements the db.RacesRepo interface for testing.
+func (t *testRacesRepo) List(filter *racing.ListRacesRequestFilter) ([]*racing.Race, error) {
+	t.lastFilter = filter
+	if t.err != nil {
+		return nil, t.err
+	}
+	return t.races, nil
 }
 
 func (t *testRacesRepo) Init() error {
 	t.initCalled = true
 	return t.err
-}
-
-func (t *testRacesRepo) List(filter *racing.ListRacesRequestFilter) ([]*racing.Race, error) {
-	t.lastFilter = filter
-
-	// Simulate delay if configured
-	if t.delay > 0 {
-		time.Sleep(t.delay)
-	}
-
-	if t.err != nil {
-		return nil, t.err
-	}
-	return t.races, nil
 }
 
 // Helper function to create bool pointer
@@ -575,5 +578,285 @@ func TestRacingService_ListRaces_TableDriven(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRacingService_GetRace_Success(t *testing.T) {
+	testRace := &racing.Race{
+		Id:        1,
+		MeetingId: 100,
+		Name:      "Test Race",
+		Number:    5,
+		Visible:   true,
+	}
+
+	repo := newTestRepo([]*racing.Race{testRace}, nil)
+	logger := zaptest.NewLogger(t)
+	service := NewRacingService(repo, logger)
+
+	request := &racing.GetRaceRequest{Id: 1}
+
+	response, err := service.GetRace(context.Background(), request)
+
+	if err != nil {
+		t.Errorf("GetRace() error = %v, want nil", err)
+	}
+
+	if response == nil {
+		t.Error("GetRace() response = nil, want non-nil")
+		return
+	}
+
+	if diff := cmp.Diff(testRace, response.Race, protocmp.Transform()); diff != "" {
+		t.Errorf("GetRace() race mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestRacingService_GetRace_NotFound(t *testing.T) {
+	repo := newTestRepo([]*racing.Race{}, nil)
+	logger := zaptest.NewLogger(t)
+	service := NewRacingService(repo, logger)
+
+	request := &racing.GetRaceRequest{Id: 999}
+
+	response, err := service.GetRace(context.Background(), request)
+
+	if err == nil {
+		t.Error("GetRace() with non-existent ID error = nil, want error")
+		return
+	}
+
+	wantErrorMsg := "failed to retrieve race"
+	if !strings.Contains(err.Error(), wantErrorMsg) {
+		t.Errorf("GetRace() error = %v, want error containing %q", err, wantErrorMsg)
+	}
+
+	if response != nil {
+		t.Errorf("GetRace() with non-existent ID response = %v, want nil", response)
+	}
+}
+
+func TestRacingService_GetRace_NilRequest(t *testing.T) {
+	repo := newTestRepo(nil, nil)
+	logger := zaptest.NewLogger(t)
+	service := NewRacingService(repo, logger)
+
+	response, err := service.GetRace(context.Background(), nil)
+
+	if err == nil {
+		t.Error("GetRace() with nil request error = nil, want error")
+		return
+	}
+
+	wantErrorMsg := "request cannot be nil"
+	if !strings.Contains(err.Error(), wantErrorMsg) {
+		t.Errorf("GetRace() error = %v, want error containing %q", err, wantErrorMsg)
+	}
+
+	if response != nil {
+		t.Errorf("GetRace() with nil request response = %v, want nil", response)
+	}
+}
+
+func TestRacingService_GetRace_InvalidID(t *testing.T) {
+	repo := newTestRepo(nil, nil)
+	logger := zaptest.NewLogger(t)
+	service := NewRacingService(repo, logger)
+
+	tests := []struct {
+		name string
+		id   int64
+	}{
+		{"zero ID", 0},
+		{"negative ID", -1},
+		{"negative large ID", -999},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := &racing.GetRaceRequest{Id: tt.id}
+
+			response, err := service.GetRace(context.Background(), request)
+
+			if err == nil {
+				t.Errorf("GetRace() with invalid ID %d error = nil, want error", tt.id)
+				return
+			}
+
+			wantErrorMsg := "race ID must be greater than 0"
+			if !strings.Contains(err.Error(), wantErrorMsg) {
+				t.Errorf("GetRace() error = %v, want error containing %q", err, wantErrorMsg)
+			}
+
+			if response != nil {
+				t.Errorf("GetRace() with invalid ID response = %v, want nil", response)
+			}
+		})
+	}
+}
+
+func TestRacingService_GetRace_CancelledContext(t *testing.T) {
+	repo := newTestRepo(nil, nil)
+	logger := zaptest.NewLogger(t)
+	service := NewRacingService(repo, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	request := &racing.GetRaceRequest{Id: 1}
+
+	response, err := service.GetRace(ctx, request)
+
+	if err == nil {
+		t.Error("GetRace() with cancelled context error = nil, want error")
+	}
+
+	wantErrorMsg := "request cancelled"
+	if !strings.Contains(err.Error(), wantErrorMsg) {
+		t.Errorf("GetRace() error = %v, want error containing %q", err, wantErrorMsg)
+	}
+
+	if response != nil {
+		t.Errorf("GetRace() with cancelled context response = %v, want nil", response)
+	}
+}
+
+func TestRacingService_GetRace_TableDriven(t *testing.T) {
+	testRace := &racing.Race{
+		Id:        42,
+		MeetingId: 200,
+		Name:      "Table Test Race",
+		Number:    7,
+		Visible:   true,
+	}
+
+	tests := []struct {
+		name          string
+		races         []*racing.Race
+		repoError     error
+		request       *racing.GetRaceRequest
+		ctx           context.Context
+		wantError     bool
+		wantRace      *racing.Race
+		errorContains string
+	}{
+		{
+			name:      "successful request",
+			races:     []*racing.Race{testRace},
+			repoError: nil,
+			request:   &racing.GetRaceRequest{Id: 42},
+			ctx:       context.Background(),
+			wantError: false,
+			wantRace:  testRace,
+		},
+		{
+			name:          "nil request",
+			races:         nil,
+			repoError:     nil,
+			request:       nil,
+			ctx:           context.Background(),
+			wantError:     true,
+			wantRace:      nil,
+			errorContains: "request cannot be nil",
+		},
+		{
+			name:          "nil context",
+			races:         nil,
+			repoError:     nil,
+			request:       &racing.GetRaceRequest{Id: 1},
+			ctx:           nil,
+			wantError:     true,
+			wantRace:      nil,
+			errorContains: "context cannot be nil",
+		},
+		{
+			name:          "invalid ID",
+			races:         nil,
+			repoError:     nil,
+			request:       &racing.GetRaceRequest{Id: -1},
+			ctx:           context.Background(),
+			wantError:     true,
+			wantRace:      nil,
+			errorContains: "race ID must be greater than 0",
+		},
+		{
+			name:          "race not found",
+			races:         []*racing.Race{},
+			repoError:     nil,
+			request:       &racing.GetRaceRequest{Id: 999},
+			ctx:           context.Background(),
+			wantError:     true,
+			wantRace:      nil,
+			errorContains: "failed to retrieve race",
+		},
+		{
+			name:          "repository error",
+			races:         nil,
+			repoError:     errors.New("db connection error"),
+			request:       &racing.GetRaceRequest{Id: 1},
+			ctx:           context.Background(),
+			wantError:     true,
+			wantRace:      nil,
+			errorContains: "failed to retrieve race",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newTestRepo(tt.races, tt.repoError)
+			logger := zaptest.NewLogger(t)
+			service := NewRacingService(repo, logger)
+
+			response, err := service.GetRace(tt.ctx, tt.request)
+
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("GetRace() error = nil, want error")
+				}
+				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("GetRace() error = %v, want error containing %q", err, tt.errorContains)
+				}
+				if response != nil {
+					t.Errorf("GetRace() response = %v, want nil", response)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("GetRace() error = %v, want nil", err)
+				}
+				if response == nil {
+					t.Error("GetRace() response = nil, want non-nil")
+					return
+				}
+				if tt.wantRace != nil {
+					if diff := cmp.Diff(tt.wantRace, response.Race, protocmp.Transform()); diff != "" {
+						t.Errorf("GetRace() race mismatch (-want +got):\n%s", diff)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Benchmark test for GetRace
+func BenchmarkRacingService_GetRace(b *testing.B) {
+	testRace := &racing.Race{
+		Id:        1,
+		MeetingId: 100,
+		Name:      "Benchmark Race",
+		Number:    1,
+		Visible:   true,
+	}
+
+	repo := newTestRepo([]*racing.Race{testRace}, nil)
+	logger := zap.NewNop() // Use no-op logger for benchmarks
+	service := NewRacingService(repo, logger)
+	request := &racing.GetRaceRequest{Id: 1}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := service.GetRace(context.Background(), request)
+		if err != nil {
+			b.Fatalf("GetRace() failed: %v", err)
+		}
 	}
 }
