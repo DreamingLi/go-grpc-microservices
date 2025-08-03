@@ -1,0 +1,82 @@
+syntax = "proto3";
+package sports;
+
+option go_package = "/sports";
+
+import "google/protobuf/timestamp.proto";
+
+service Sports {
+  // ListEvents will return a collection of all sports events.
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse) {}
+  
+  // GetEvent will return a single sports event by its ID.
+  rpc GetEvent(GetEventRequest) returns (GetEventResponse) {}
+}
+
+/* Requests/Responses */
+
+message ListEventsRequest {
+  ListEventsRequestFilter filter = 1;
+}
+
+// Response to ListEvents call.
+message ListEventsResponse {
+  repeated Event events = 1;
+}
+
+// Request for GetEvent call.
+message GetEventRequest {
+  // ID of the event to retrieve.
+  int64 id = 1;
+}
+
+// Response to GetEvent call.
+message GetEventResponse {
+  Event event = 1;
+}
+
+// Filter for listing sports events.
+message ListEventsRequestFilter {
+  repeated string sport_types = 1; // Filter by sport types like "football", "basketball"
+  optional bool visible_only = 2;
+  optional SortField sort_field = 3; // Defaults to ADVERTISED_START_TIME if not specified.
+  optional SortDirection sort_direction = 4; // Defaults to ASC if not specified.
+}
+
+// Available fields for sorting events.
+enum SortField {
+  ADVERTISED_START_TIME = 0;
+  NAME = 1;
+  SPORT_TYPE = 2;
+}
+
+// Sort direction options.
+enum SortDirection {
+  ASC = 0; // Ascending order (default).
+  DESC = 1;  // Descending order.
+}
+
+enum EventStatus {
+  OPEN = 0;   // Event is open (advertised_start_time is in the future)
+  CLOSED = 1; // Event is closed (advertised_start_time is in the past)
+}
+
+/* Resources */
+
+// A sports event resource.
+message Event {
+  // ID represents a unique identifier for the event.
+  int64 id = 1;
+  // Name is the official name given to the event.
+  string name = 2;
+  // AdvertisedStartTime is the time the event is advertised to start.
+  google.protobuf.Timestamp advertised_start_time = 3;
+  // SportType represents the type of sport (e.g., "football", "basketball").
+  string sport_type = 4;
+  // Venue represents where the event is taking place.
+  string venue = 5;
+  // Visible represents whether or not the event is visible.
+  bool visible = 6;
+  // Status represents the current status of the event, derived from advertised_start_time.
+  EventStatus status = 7;
+}
