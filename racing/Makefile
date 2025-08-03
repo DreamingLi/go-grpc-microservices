@@ -61,19 +61,6 @@ clean:
 check: fmt vet lint test
 	@echo "All quality checks passed!"
 
-# Install dependencies for testing and development
-deps:
-	go mod tidy
-	go install golang.org/x/lint/golint@latest
-	go get github.com/stretchr/testify/assert
-	go get github.com/stretchr/testify/require
-	go get github.com/stretchr/testify/mock
-	@echo "Dependencies installed"
-
 # Run the service
 run: build
 	./racing
-
-# Development setup
-dev-setup: deps proto check
-	@echo "Development environment setup completed!"

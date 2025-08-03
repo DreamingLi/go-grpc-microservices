@@ -269,6 +269,19 @@ func TestRacesRepo_List(t *testing.T) {
 					t.Errorf("List(%+v): race.AdvertisedStartTime is nil for race ID %d", tt.filter, race.Id)
 				}
 
+				// Validate status field is properly set
+				gotTime, err := ptypes.Timestamp(race.AdvertisedStartTime)
+				if err == nil {
+					expectedStatus := racing.RaceStatus_OPEN
+					if gotTime.Before(time.Now()) {
+						expectedStatus = racing.RaceStatus_CLOSED
+					}
+					if race.Status != expectedStatus {
+						t.Errorf("List(%+v): race ID %d has status %v, want %v based on start time %v",
+							tt.filter, race.Id, race.Status, expectedStatus, gotTime)
+					}
+				}
+
 				if tt.filter != nil && tt.filter.VisibleOnly != nil && *tt.filter.VisibleOnly {
 					if !race.Visible {
 						t.Errorf("List(%+v): expected only visible races, but race ID %d has visible = %t",
@@ -485,9 +498,9 @@ func TestRacesRepo_List_Sorting(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		filter     *racing.ListRacesRequestFilter
-		wantOrder  []int64 // Expected race IDs in order
+		name      string
+		filter    *racing.ListRacesRequestFilter
+		wantOrder []int64 // Expected race IDs in order
 	}{
 		{
 			name:      "default sorting by advertised_start_time ASC",
@@ -556,5 +569,62 @@ func TestRacesRepo_List_Sorting(t *testing.T) {
 				t.Errorf("List(%+v) race order mismatch (-want +got):\n%s", tt.filter, diff)
 			}
 		})
+	}
+}
+
+func TestRacesRepo_List_StatusLogic(t *testing.T) {
+	db := setupTestDB(t)
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Failed to close database: %v", err)
+		}
+	}()
+
+	repo := NewRacesRepo(db)
+
+	// Setup test data with past and future times
+	now := time.Now()
+	testRaces := []struct {
+		id             int
+		name           string
+		startTime      time.Time
+		expectedStatus racing.RaceStatus
+	}{
+		{1, "Past Race", now.Add(-1 * time.Hour), racing.RaceStatus_CLOSED},
+		{2, "Future Race", now.Add(1 * time.Hour), racing.RaceStatus_OPEN},
+		{3, "Very Past Race", now.Add(-24 * time.Hour), racing.RaceStatus_CLOSED},
+		{4, "Very Future Race", now.Add(24 * time.Hour), racing.RaceStatus_OPEN},
+	}
+
+	for _, race := range testRaces {
+		insertTestRace(t, db, race.id, 1, 1, race.name, true, race.startTime)
+	}
+
+	gotRaces, err := repo.List(&racing.ListRacesRequestFilter{})
+	if err != nil {
+		t.Fatalf("List() failed: %v", err)
+	}
+
+	if len(gotRaces) != len(testRaces) {
+		t.Fatalf("List() returned %d races, want %d", len(gotRaces), len(testRaces))
+	}
+
+	// Create a map for easier lookup
+	raceMap := make(map[int64]*racing.Race)
+	for _, race := range gotRaces {
+		raceMap[race.Id] = race
+	}
+
+	for _, expectedRace := range testRaces {
+		gotRace, exists := raceMap[int64(expectedRace.id)]
+		if !exists {
+			t.Errorf("Expected race ID %d not found in results", expectedRace.id)
+			continue
+		}
+
+		if gotRace.Status != expectedRace.expectedStatus {
+			t.Errorf("Race ID %d (%s) has status %v, want %v",
+				expectedRace.id, expectedRace.name, gotRace.Status, expectedRace.expectedStatus)
+		}
 	}
 }

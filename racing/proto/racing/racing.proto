@@ -43,6 +43,11 @@ enum SortDirection {
   DESC = 1;  // Descending order.
 }
 
+enum RaceStatus {
+  OPEN = 0;   // Race is open (advertised_start_time is in the future)
+  CLOSED = 1; // Race is closed (advertised_start_time is in the past)
+}
+
 /* Resources */
 
 // A race resource.
@@ -59,5 +64,7 @@ message Race {
   bool visible = 5;
   // AdvertisedStartTime is the time the race is advertised to run.
   google.protobuf.Timestamp advertised_start_time = 6;
+  // Status represents the current status of the race, derived from advertised_start_time.
+  RaceStatus status = 7;
 }
 

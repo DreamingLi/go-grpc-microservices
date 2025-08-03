@@ -130,7 +130,7 @@ func (r *racesRepo) applySorting(query string, filter *racing.ListRacesRequestFi
 	return query + " ORDER BY " + sortField + " " + sortDirection
 }
 
-func (m *racesRepo) scanRaces(
+func (r *racesRepo) scanRaces(
 	rows *sql.Rows,
 ) ([]*racing.Race, error) {
 	var races []*racing.Race
@@ -153,6 +153,12 @@ func (m *racesRepo) scanRaces(
 		}
 
 		race.AdvertisedStartTime = ts
+
+		// Derive status based on advertised_start_time
+		race.Status = racing.RaceStatus_OPEN
+		if advertisedStart.Before(time.Now()) {
+			race.Status = racing.RaceStatus_CLOSED
+		}
 
 		races = append(races, &race)
 	}
