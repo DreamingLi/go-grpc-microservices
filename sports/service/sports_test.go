@@ -98,7 +98,7 @@ func TestSportsService_ListEvents_Success(t *testing.T) {
 		},
 		{
 			Id:        2,
-			Name:      "Team C vs Team D", 
+			Name:      "Team C vs Team D",
 			SportType: "basketball",
 			Venue:     "Arena B",
 			Visible:   false,

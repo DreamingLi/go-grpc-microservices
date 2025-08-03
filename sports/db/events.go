@@ -74,12 +74,12 @@ func (r *eventsRepo) List(filter *sports.ListEventsRequestFilter) ([]*sports.Eve
 // Returns the event if found, or an error if not found or database error occurs.
 func (r *eventsRepo) GetByID(id int64) (*sports.Event, error) {
 	query := getEventQueries()[eventsGetByID]
-	
+
 	row := r.db.QueryRow(query, id)
-	
+
 	var event sports.Event
 	var advertisedStart time.Time
-	
+
 	err := row.Scan(&event.Id, &event.Name, &advertisedStart, &event.SportType, &event.Venue, &event.Visible)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -87,17 +87,17 @@ func (r *eventsRepo) GetByID(id int64) (*sports.Event, error) {
 		}
 		return nil, err
 	}
-	
+
 	ts, err := ptypes.TimestampProto(advertisedStart)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	event.AdvertisedStartTime = ts
-	
+
 	// Set event status based on advertised start time
 	setEventStatus(&event, advertisedStart)
-	
+
 	return &event, nil
 }
 

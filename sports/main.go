@@ -34,7 +34,7 @@ func run() error {
 	}
 	defer log.Sync()
 
-	log.Info("Starting sports service", 
+	log.Info("Starting sports service",
 		zap.String("grpc_endpoint", *grpcEndpoint))
 
 	// Initialize database connection
