@@ -17,6 +17,12 @@ type Racing interface {
 	// and a request containing optional filters for race visibility and meeting IDs.
 	// Returns a response with the filtered races or an error if the operation fails.
 	ListRaces(ctx context.Context, in *racing.ListRacesRequest) (*racing.ListRacesResponse, error)
+
+	// GetRace retrieves a single race by its ID.
+	// It accepts a context for request lifecycle management and cancellation,
+	// and a request containing the race ID to retrieve.
+	// Returns a response with the race or an error if the operation fails.
+	GetRace(ctx context.Context, in *racing.GetRaceRequest) (*racing.GetRaceResponse, error)
 }
 
 type racingService struct {
@@ -86,4 +92,56 @@ func (s *racingService) ListRaces(ctx context.Context, in *racing.ListRacesReque
 	}
 
 	return &racing.ListRacesResponse{Races: races}, nil
+}
+
+func (s *racingService) GetRace(ctx context.Context, in *racing.GetRaceRequest) (*racing.GetRaceResponse, error) {
+	reqLogger := s.logger.With(
+		zap.String("method", "GetRace"),
+		zap.Int64("race_id", in.GetId()),
+	)
+
+	reqLogger.Debug("Request started")
+
+	// Context validation
+	if ctx == nil {
+		reqLogger.Error("Context validation failed: nil context")
+		return nil, fmt.Errorf("context cannot be nil")
+	}
+
+	// Check if context is cancelled
+	select {
+	case <-ctx.Done():
+		reqLogger.Warn("Request cancelled",
+			zap.Error(ctx.Err()),
+		)
+		return nil, fmt.Errorf("request cancelled: %w", ctx.Err())
+	default:
+		// Continue processing
+	}
+
+	// Input validation
+	if in == nil {
+		reqLogger.Warn("Request validation failed: nil request")
+		return nil, fmt.Errorf("request cannot be nil")
+	}
+
+	if in.Id <= 0 {
+		reqLogger.Warn("Request validation failed: invalid race ID",
+			zap.Int64("race_id", in.Id),
+		)
+		return nil, fmt.Errorf("race ID must be greater than 0")
+	}
+
+	reqLogger.Debug("Calling repository")
+
+	// Call repository
+	race, err := s.racesRepo.GetByID(in.Id)
+	if err != nil {
+		reqLogger.Error("Repository call failed",
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("failed to retrieve race: %w", err)
+	}
+
+	return &racing.GetRaceResponse{Race: race}, nil
 }
