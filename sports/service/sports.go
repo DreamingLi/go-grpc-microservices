@@ -71,6 +71,14 @@ func (s *sportsService) ListEvents(ctx context.Context, in *sports.ListEventsReq
 		return nil, fmt.Errorf("request cannot be nil")
 	}
 
+	// Validate request using proto validation
+	if err := in.Validate(); err != nil {
+		reqLogger.Warn("Request validation failed",
+			zap.Error(err),
+		)
+		return nil, fmt.Errorf("invalid request: %w", err)
+	}
+
 	reqLogger.Debug("Calling repository")
 
 	// Call repository
@@ -116,11 +124,12 @@ func (s *sportsService) GetEvent(ctx context.Context, in *sports.GetEventRequest
 		return nil, fmt.Errorf("request cannot be nil")
 	}
 
-	if in.Id <= 0 {
-		reqLogger.Warn("Request validation failed: invalid event ID",
-			zap.Int64("event_id", in.Id),
+	// Validate request using proto validation
+	if err := in.Validate(); err != nil {
+		reqLogger.Warn("Request validation failed",
+			zap.Error(err),
 		)
-		return nil, fmt.Errorf("event ID must be greater than 0")
+		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
 	reqLogger.Debug("Calling repository")

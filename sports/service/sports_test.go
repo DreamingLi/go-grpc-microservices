@@ -233,7 +233,7 @@ func TestSportsService_GetEvent_InvalidID(t *testing.T) {
 				return
 			}
 
-			wantErrorMsg := "event ID must be greater than 0"
+			wantErrorMsg := "invalid request"
 			if !strings.Contains(err.Error(), wantErrorMsg) {
 				t.Errorf("GetEvent() error = %v, want error containing %q", err, wantErrorMsg)
 			}
