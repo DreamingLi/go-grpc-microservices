@@ -37,6 +37,27 @@ entain/
 
 ### Getting Started
 
+#### Environment Variables
+
+The services use the following environment variables for configuration:
+
+- `LOG_LEVEL` - Controls logging level. Default: `info`
+  - `debug` - Show all logs including debug information
+  - `info` - Show info, warn, and error logs
+  - `warn` - Show warn and error logs only
+  - `error` - Show error logs only
+
+- `ENVIRONMENT` - Controls deployment environment. Default: `production`
+  - `development` or `dev` - Development mode with console output and colored logs
+  - `production` or `prod` - Production mode with JSON formatted logs
+  - `testing` or `test` - Testing mode with console output, no caller info
+
+Example:
+```bash
+export LOG_LEVEL=debug
+export ENVIRONMENT=development
+```
+
 1. Install Go (latest).
 
 ```bash
